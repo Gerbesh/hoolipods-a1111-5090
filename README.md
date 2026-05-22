@@ -27,6 +27,20 @@ Persistent /workspace volume contains:
 - 8080 - FileBrowser
 - 8888 - JupyterLab
 
+## Environment
+
+- `USER_NAME` or `HOOLIPODS_USER_NAME` - user folder name for outputs.
+- `WORKSPACE` - volume mount path, defaults to `/workspace`.
+- `OUTPUTS_ROOT` - output root, defaults to `/workspace/outputs`.
+
+The container validates `USER_NAME` and writes A1111 outputs to:
+
+```text
+/workspace/outputs/<USER_NAME>
+```
+
+Allowed `USER_NAME` characters: letters, digits, `.`, `_`, `-`, `@`.
+
 ## Run locally
 
 docker run --rm -it --gpus all `

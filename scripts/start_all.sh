@@ -2,7 +2,20 @@
 set -Eeuo pipefail
 
 export WORKSPACE="${WORKSPACE:-/workspace}"
-export USER_NAME="${USER_NAME:-PAVEL}"
+export USER_NAME="${HOOLIPODS_USER_NAME:-${USER_NAME:-PAVEL}}"
+
+if [[ -z "$USER_NAME" || "$USER_NAME" == "." || "$USER_NAME" == ".." || "$USER_NAME" == *"/"* || "$USER_NAME" == *"\\"* || "$USER_NAME" == *".."* ]]; then
+  echo "[HooliPods A1111] Invalid USER_NAME: '$USER_NAME'" >&2
+  exit 64
+fi
+
+if [[ ! "$USER_NAME" =~ ^[A-Za-z0-9._@-]+$ ]]; then
+  echo "[HooliPods A1111] Invalid USER_NAME: '$USER_NAME'. Allowed: letters, digits, dot, underscore, dash, at-sign." >&2
+  exit 64
+fi
+
+export OUTPUTS_ROOT="${OUTPUTS_ROOT:-$WORKSPACE/outputs}"
+export OUTPUT_DIR="$OUTPUTS_ROOT/$USER_NAME"
 
 export A1111_DIR="${A1111_DIR:-$WORKSPACE/stable-diffusion-webui}"
 export VENV_PATH="${VENV_PATH:-$WORKSPACE/venvs/a1111}"
@@ -20,11 +33,12 @@ mkdir -p "$WORKSPACE/models/Lora"
 mkdir -p "$WORKSPACE/models/VAE"
 mkdir -p "$WORKSPACE/models/ControlNet"
 mkdir -p "$WORKSPACE/embeddings"
-mkdir -p "$WORKSPACE/outputs/$USER_NAME"
+mkdir -p "$OUTPUT_DIR"
 mkdir -p "$WORKSPACE/config/a1111"
 
 echo "[HooliPods A1111] USER_NAME=$USER_NAME"
 echo "[HooliPods A1111] WORKSPACE=$WORKSPACE"
+echo "[HooliPods A1111] OUTPUT_DIR=$OUTPUT_DIR"
 echo "[HooliPods A1111] A1111_DIR=$A1111_DIR"
 echo "[HooliPods A1111] VENV_PATH=$VENV_PATH"
 echo "[HooliPods A1111] A1111_REF=$A1111_REF"
@@ -83,7 +97,7 @@ ln -s "$WORKSPACE/models/Lora" "$A1111_DIR/models/Lora"
 ln -s "$WORKSPACE/models/VAE" "$A1111_DIR/models/VAE"
 ln -s "$WORKSPACE/models/ControlNet" "$A1111_DIR/models/ControlNet"
 ln -s "$WORKSPACE/embeddings" "$A1111_DIR/embeddings"
-ln -s "$WORKSPACE/outputs/$USER_NAME" "$A1111_DIR/outputs"
+ln -s "$OUTPUT_DIR" "$A1111_DIR/outputs"
 
 echo "[HooliPods A1111] Starting FileBrowser on :8080"
 filebrowser \
