@@ -1,0 +1,7 @@
+.git
+.github
+.runpod
+workspace-test
+*.log
+*.tmp
+__pycache__
