@@ -16,6 +16,8 @@ fi
 
 export OUTPUTS_ROOT="${OUTPUTS_ROOT:-$WORKSPACE/outputs}"
 export OUTPUT_DIR="$OUTPUTS_ROOT/$USER_NAME"
+export USER_DATA_ROOT="${USER_DATA_ROOT:-$WORKSPACE/userdata/a1111}"
+export USER_DATA_DIR="$USER_DATA_ROOT/$USER_NAME"
 
 export A1111_DIR="${A1111_DIR:-$WORKSPACE/stable-diffusion-webui}"
 export VENV_PATH="${VENV_PATH:-$WORKSPACE/venvs/a1111}"
@@ -24,7 +26,8 @@ export TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu12
 export STABLE_DIFFUSION_REPO="${STABLE_DIFFUSION_REPO:-https://github.com/w-e-w/stablediffusion.git}"
 export GIT_TERMINAL_PROMPT=0
 
-export COMMANDLINE_ARGS="${COMMANDLINE_ARGS:---listen --port 7860 --api --enable-insecure-extension-access --skip-torch-cuda-test --skip-python-version-check --opt-sdp-attention --no-half-vae --no-download-sd-model --gradio-allowed-path /workspace}"
+export COMMANDLINE_ARGS="${COMMANDLINE_ARGS:---listen --port 7860 --api --enable-insecure-extension-access --skip-torch-cuda-test --skip-python-version-check --opt-sdp-attention --no-half-vae --no-download-sd-model}"
+export COMMANDLINE_ARGS="$COMMANDLINE_ARGS --data-dir $USER_DATA_DIR --models-dir $WORKSPACE/models --ckpt-dir $WORKSPACE/models/Stable-diffusion --vae-dir $WORKSPACE/models/VAE --embeddings-dir $WORKSPACE/embeddings --gradio-allowed-path $WORKSPACE"
 
 mkdir -p "$WORKSPACE/logs"
 mkdir -p "$WORKSPACE/venvs"
@@ -34,11 +37,15 @@ mkdir -p "$WORKSPACE/models/VAE"
 mkdir -p "$WORKSPACE/models/ControlNet"
 mkdir -p "$WORKSPACE/embeddings"
 mkdir -p "$OUTPUT_DIR"
+mkdir -p "$USER_DATA_DIR"
 mkdir -p "$WORKSPACE/config/a1111"
+rm -rf "$USER_DATA_DIR/outputs"
+ln -s "$OUTPUT_DIR" "$USER_DATA_DIR/outputs"
 
 echo "[HooliPods A1111] USER_NAME=$USER_NAME"
 echo "[HooliPods A1111] WORKSPACE=$WORKSPACE"
 echo "[HooliPods A1111] OUTPUT_DIR=$OUTPUT_DIR"
+echo "[HooliPods A1111] USER_DATA_DIR=$USER_DATA_DIR"
 echo "[HooliPods A1111] A1111_DIR=$A1111_DIR"
 echo "[HooliPods A1111] VENV_PATH=$VENV_PATH"
 echo "[HooliPods A1111] A1111_REF=$A1111_REF"
@@ -75,7 +82,6 @@ cat > "$A1111_DIR/webui-user.sh" <<EOF
 #!/usr/bin/env bash
 export python_cmd="$VENV_PATH/bin/python"
 export venv_dir="$VENV_PATH"
-export COMMANDLINE_ARGS="$COMMANDLINE_ARGS"
 export TORCH_COMMAND="pip install torch torchvision torchaudio --index-url $TORCH_INDEX_URL"
 export STABLE_DIFFUSION_REPO="$STABLE_DIFFUSION_REPO"
 export GIT_TERMINAL_PROMPT=0
@@ -90,14 +96,12 @@ rm -rf "$A1111_DIR/models/Lora"
 rm -rf "$A1111_DIR/models/VAE"
 rm -rf "$A1111_DIR/models/ControlNet"
 rm -rf "$A1111_DIR/embeddings"
-rm -rf "$A1111_DIR/outputs"
 
 ln -s "$WORKSPACE/models/Stable-diffusion" "$A1111_DIR/models/Stable-diffusion"
 ln -s "$WORKSPACE/models/Lora" "$A1111_DIR/models/Lora"
 ln -s "$WORKSPACE/models/VAE" "$A1111_DIR/models/VAE"
 ln -s "$WORKSPACE/models/ControlNet" "$A1111_DIR/models/ControlNet"
 ln -s "$WORKSPACE/embeddings" "$A1111_DIR/embeddings"
-ln -s "$OUTPUT_DIR" "$A1111_DIR/outputs"
 
 echo "[HooliPods A1111] Starting FileBrowser on :8080"
 filebrowser \

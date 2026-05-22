@@ -32,11 +32,18 @@ Persistent /workspace volume contains:
 - `USER_NAME` or `HOOLIPODS_USER_NAME` - user folder name for outputs.
 - `WORKSPACE` - volume mount path, defaults to `/workspace`.
 - `OUTPUTS_ROOT` - output root, defaults to `/workspace/outputs`.
+- `USER_DATA_ROOT` - per-user A1111 settings root, defaults to `/workspace/userdata/a1111`.
 
 The container validates `USER_NAME` and writes A1111 outputs to:
 
 ```text
 /workspace/outputs/<USER_NAME>
+```
+
+A1111 per-user config/data is stored separately in:
+
+```text
+/workspace/userdata/a1111/<USER_NAME>
 ```
 
 Allowed `USER_NAME` characters: letters, digits, `.`, `_`, `-`, `@`.
