@@ -31,6 +31,7 @@ export HF_HOME="${HF_HOME:-$WORKSPACE/.cache/huggingface}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$WORKSPACE/.cache/huggingface}"
 export TORCH_HOME="${TORCH_HOME:-$WORKSPACE/.cache/torch}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$WORKSPACE/.cache/pip}"
+export PIP_CONSTRAINT="${PIP_CONSTRAINT:-$WORKSPACE/config/a1111/pip-constraints.txt}"
 
 export RUN_CUDA_DIAGNOSTIC="${RUN_CUDA_DIAGNOSTIC:-0}"
 export FORCE_BOOTSTRAP="${FORCE_BOOTSTRAP:-0}"
@@ -50,6 +51,11 @@ mkdir -p "$USER_DATA_DIR"
 mkdir -p "$WORKSPACE/config/a1111"
 mkdir -p "$XDG_CACHE_HOME" "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR" "$WORKSPACE/.hoolipods" "$WORKSPACE/.filebrowser"
 
+cat > "$PIP_CONSTRAINT" <<'EOF'
+numpy==1.26.2
+protobuf==3.20.0
+EOF
+
 rm -rf "$USER_DATA_DIR/outputs"
 ln -s "$OUTPUT_DIR" "$USER_DATA_DIR/outputs"
 
@@ -61,6 +67,7 @@ echo "[HooliPods A1111] A1111_DIR=$A1111_DIR"
 echo "[HooliPods A1111] VENV_PATH=$VENV_PATH"
 echo "[HooliPods A1111] A1111_REF=$A1111_REF"
 echo "[HooliPods A1111] STABLE_DIFFUSION_REPO=$STABLE_DIFFUSION_REPO"
+echo "[HooliPods A1111] PIP_CONSTRAINT=$PIP_CONSTRAINT"
 echo "[HooliPods A1111] RUN_CUDA_DIAGNOSTIC=$RUN_CUDA_DIAGNOSTIC"
 echo "[HooliPods A1111] FORCE_BOOTSTRAP=$FORCE_BOOTSTRAP"
 echo "[HooliPods A1111] COMMANDLINE_ARGS=$COMMANDLINE_ARGS"
@@ -82,7 +89,7 @@ fi
 
 source "$VENV_PATH/bin/activate"
 
-BOOTSTRAP_MARKER="$WORKSPACE/.hoolipods/a1111_bootstrap_v2.ok"
+BOOTSTRAP_MARKER="$WORKSPACE/.hoolipods/a1111_bootstrap_v3.ok"
 
 if [[ "$FORCE_BOOTSTRAP" == "1" || ! -f "$BOOTSTRAP_MARKER" ]]; then
   echo "[HooliPods A1111] Running bootstrap because marker is missing or FORCE_BOOTSTRAP=1..."
@@ -124,9 +131,6 @@ PY
     "numpy==1.26.2" \
     "protobuf==3.20.0"
 
-  echo "[HooliPods A1111] Installing mediapipe package without pulling numpy2/protobuf4/jax deps..."
-  python -m pip install --force-reinstall --no-deps "mediapipe==0.10.11" || true
-
   echo "[HooliPods A1111] Bootstrap smoke test..."
   python - <<'PY'
 import numpy
@@ -147,6 +151,38 @@ else
   echo "[HooliPods A1111] Bootstrap marker exists. Skipping pip/torch/clip/deps install. Set FORCE_BOOTSTRAP=1 to rerun."
 fi
 
+echo "[HooliPods A1111] Pre-launch dependency guard..."
+python - <<'PY'
+import subprocess
+import sys
+
+def get_version(module_name, attr="__version__"):
+    try:
+        module = __import__(module_name)
+        return getattr(module, attr, "")
+    except Exception:
+        return ""
+
+numpy_version = get_version("numpy")
+try:
+    import google.protobuf
+    protobuf_version = google.protobuf.__version__
+except Exception:
+    protobuf_version = ""
+
+print("dependency guard numpy:", numpy_version)
+print("dependency guard protobuf:", protobuf_version)
+
+if numpy_version != "1.26.2" or protobuf_version != "3.20.0":
+    print("dependency guard repairing numpy/protobuf")
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install",
+        "--force-reinstall", "--no-deps",
+        "numpy==1.26.2",
+        "protobuf==3.20.0",
+    ])
+PY
+
 cat > "$A1111_DIR/webui-user.sh" <<EOF
 #!/usr/bin/env bash
 export python_cmd="$VENV_PATH/bin/python"
@@ -159,6 +195,7 @@ export HF_HOME="$HF_HOME"
 export TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE"
 export TORCH_HOME="$TORCH_HOME"
 export PIP_CACHE_DIR="$PIP_CACHE_DIR"
+export PIP_CONSTRAINT="$PIP_CONSTRAINT"
 EOF
 
 chmod +x "$A1111_DIR/webui-user.sh"
