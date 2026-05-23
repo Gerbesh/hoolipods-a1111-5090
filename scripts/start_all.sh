@@ -36,7 +36,7 @@ export PIP_CONSTRAINT="${PIP_CONSTRAINT:-$WORKSPACE/config/a1111/pip-constraints
 export RUN_CUDA_DIAGNOSTIC="${RUN_CUDA_DIAGNOSTIC:-0}"
 export FORCE_BOOTSTRAP="${FORCE_BOOTSTRAP:-0}"
 
-export COMMANDLINE_ARGS="${COMMANDLINE_ARGS:---listen --port 7860 --api --enable-insecure-extension-access --skip-torch-cuda-test --skip-python-version-check --opt-sdp-attention --no-half-vae --no-download-sd-model}"
+export COMMANDLINE_ARGS="${COMMANDLINE_ARGS:---listen --port 7860 --api --enable-insecure-extension-access --skip-torch-cuda-test --skip-python-version-check --skip-install --opt-sdp-attention --no-half-vae --no-download-sd-model}"
 export COMMANDLINE_ARGS="$COMMANDLINE_ARGS --data-dir $USER_DATA_DIR --models-dir $WORKSPACE/models --ckpt-dir $WORKSPACE/models/Stable-diffusion --vae-dir $WORKSPACE/models/VAE --embeddings-dir $WORKSPACE/embeddings --gradio-allowed-path $WORKSPACE"
 
 mkdir -p "$WORKSPACE/logs"
@@ -54,6 +54,7 @@ mkdir -p "$XDG_CACHE_HOME" "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR" "$WORKSPACE
 cat > "$PIP_CONSTRAINT" <<'EOF'
 numpy==1.26.2
 protobuf==3.20.0
+mediapipe==0.10.13
 EOF
 
 rm -rf "$USER_DATA_DIR/outputs"
@@ -183,6 +184,74 @@ if numpy_version != "1.26.2" or protobuf_version != "3.20.0":
     ])
 PY
 
+echo "[HooliPods A1111] Mediapipe legacy solutions guard..."
+python - <<'PY'
+import subprocess
+import sys
+
+versions = ["0.10.13", "0.10.14", "0.10.21"]
+
+def has_solutions():
+    try:
+        import mediapipe as mp
+        print("mediapipe:", getattr(mp, "__version__", "?"), "has solutions:", hasattr(mp, "solutions"))
+        return hasattr(mp, "solutions")
+    except Exception as exc:
+        print("mediapipe import warning:", repr(exc))
+        return False
+
+if not has_solutions():
+    for version in versions:
+        print("trying mediapipe==", version)
+        subprocess.call([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", f"mediapipe=={version}"])
+        if has_solutions():
+            break
+PY
+
+if [[ "${DISABLE_CANVAS_ZOOM:-1}" == "1" ]]; then
+  echo "[HooliPods A1111] Disabling slow canvas zoom extension if present. Set DISABLE_CANVAS_ZOOM=0 to keep it enabled."
+  python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+base = Path(os.environ.get("USER_DATA_DIR", "/workspace/userdata/a1111/PAVEL"))
+ext_dir = base / "extensions"
+config_path = base / "config.json"
+
+matches = []
+if ext_dir.exists():
+    for p in ext_dir.iterdir():
+        name = p.name.lower()
+        if p.is_dir() and "canvas" in name and "zoom" in name:
+            matches.append(p.name)
+
+cfg = {}
+if config_path.exists():
+    try:
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        cfg = {}
+
+disabled = cfg.get("disabled_extensions") or []
+if not isinstance(disabled, list):
+    disabled = []
+
+changed = False
+for name in matches:
+    if name not in disabled:
+        disabled.append(name)
+        changed = True
+
+if changed:
+    cfg["disabled_extensions"] = disabled
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print("disabled canvas zoom extensions:", ", ".join(matches))
+else:
+    print("canvas zoom disable unchanged:", ", ".join(matches) if matches else "not found")
+PY
+fi
 cat > "$A1111_DIR/webui-user.sh" <<EOF
 #!/usr/bin/env bash
 export python_cmd="$VENV_PATH/bin/python"
@@ -227,6 +296,36 @@ filebrowser config set -d "$FB_DB" --auth.method=json || true
 filebrowser users update "$FB_USER" --password "$FB_PASS" --perm.admin -d "$FB_DB" || filebrowser users add "$FB_USER" "$FB_PASS" --perm.admin -d "$FB_DB" || true
 filebrowser users ls -d "$FB_DB" || true
 nohup filebrowser -d "$FB_DB" -a 0.0.0.0 -p 8080 -r "$WORKSPACE" > "$FB_LOG" 2>&1 &
+FB_PID=$!
+
+sleep 1
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS --max-time 2 http://127.0.0.1:8080/ >/dev/null; then
+    echo "[HooliPods A1111] FileBrowser is responding on :8080 pid=$FB_PID"
+    break
+  fi
+  if ! kill -0 "$FB_PID" 2>/dev/null; then
+    echo "[HooliPods A1111] FileBrowser process exited early. Log follows:"
+    tail -80 "$FB_LOG" || true
+    break
+  fi
+  sleep 1
+done
+FB_PID=$!
+
+sleep 1
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS --max-time 2 http://127.0.0.1:8080/ >/dev/null; then
+    echo "[HooliPods A1111] FileBrowser is responding on :8080 pid=$FB_PID"
+    break
+  fi
+  if ! kill -0 "$FB_PID" 2>/dev/null; then
+    echo "[HooliPods A1111] FileBrowser process exited early. Log follows:"
+    tail -80 "$FB_LOG" || true
+    break
+  fi
+  sleep 1
+done
 
 echo "[HooliPods A1111] Starting JupyterLab on :8888"
 jupyter lab \
