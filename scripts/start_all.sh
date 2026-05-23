@@ -26,6 +26,15 @@ export TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu12
 export STABLE_DIFFUSION_REPO="${STABLE_DIFFUSION_REPO:-https://github.com/w-e-w/stablediffusion.git}"
 export GIT_TERMINAL_PROMPT=0
 
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$WORKSPACE/.cache}"
+export HF_HOME="${HF_HOME:-$WORKSPACE/.cache/huggingface}"
+export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$WORKSPACE/.cache/huggingface}"
+export TORCH_HOME="${TORCH_HOME:-$WORKSPACE/.cache/torch}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$WORKSPACE/.cache/pip}"
+
+export RUN_CUDA_DIAGNOSTIC="${RUN_CUDA_DIAGNOSTIC:-0}"
+export FORCE_BOOTSTRAP="${FORCE_BOOTSTRAP:-0}"
+
 export COMMANDLINE_ARGS="${COMMANDLINE_ARGS:---listen --port 7860 --api --enable-insecure-extension-access --skip-torch-cuda-test --skip-python-version-check --opt-sdp-attention --no-half-vae --no-download-sd-model}"
 export COMMANDLINE_ARGS="$COMMANDLINE_ARGS --data-dir $USER_DATA_DIR --models-dir $WORKSPACE/models --ckpt-dir $WORKSPACE/models/Stable-diffusion --vae-dir $WORKSPACE/models/VAE --embeddings-dir $WORKSPACE/embeddings --gradio-allowed-path $WORKSPACE"
 
@@ -39,6 +48,8 @@ mkdir -p "$WORKSPACE/embeddings"
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$USER_DATA_DIR"
 mkdir -p "$WORKSPACE/config/a1111"
+mkdir -p "$XDG_CACHE_HOME" "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR" "$WORKSPACE/.hoolipods"
+
 rm -rf "$USER_DATA_DIR/outputs"
 ln -s "$OUTPUT_DIR" "$USER_DATA_DIR/outputs"
 
@@ -50,6 +61,8 @@ echo "[HooliPods A1111] A1111_DIR=$A1111_DIR"
 echo "[HooliPods A1111] VENV_PATH=$VENV_PATH"
 echo "[HooliPods A1111] A1111_REF=$A1111_REF"
 echo "[HooliPods A1111] STABLE_DIFFUSION_REPO=$STABLE_DIFFUSION_REPO"
+echo "[HooliPods A1111] RUN_CUDA_DIAGNOSTIC=$RUN_CUDA_DIAGNOSTIC"
+echo "[HooliPods A1111] FORCE_BOOTSTRAP=$FORCE_BOOTSTRAP"
 echo "[HooliPods A1111] COMMANDLINE_ARGS=$COMMANDLINE_ARGS"
 
 if [ ! -d "$A1111_DIR/.git" ]; then
@@ -69,14 +82,76 @@ fi
 
 source "$VENV_PATH/bin/activate"
 
-echo "[HooliPods A1111] Installing/updating bootstrap Python deps..."
-python -m pip install --upgrade "pip<25.3" "setuptools==69.5.1" wheel
+BOOTSTRAP_MARKER="$WORKSPACE/.hoolipods/a1111_bootstrap_v2.ok"
 
-echo "[HooliPods A1111] Installing PyTorch CUDA 12.8 into volume venv..."
-pip install torch torchvision torchaudio --index-url "$TORCH_INDEX_URL"
+if [[ "$FORCE_BOOTSTRAP" == "1" || ! -f "$BOOTSTRAP_MARKER" ]]; then
+  echo "[HooliPods A1111] Running bootstrap because marker is missing or FORCE_BOOTSTRAP=1..."
 
-echo "[HooliPods A1111] Preinstalling OpenAI CLIP without build isolation..."
-pip install --no-build-isolation "https://github.com/openai/CLIP/archive/d50d76daa670286dd6cacf3bcd80b5e4823fc8e1.zip"
+  echo "[HooliPods A1111] Installing/updating bootstrap Python deps..."
+  python -m pip install --upgrade "pip<25.3" "setuptools==69.5.1" wheel
+
+  echo "[HooliPods A1111] Installing PyTorch CUDA 12.8 into volume venv..."
+  pip install torch torchvision torchaudio --index-url "$TORCH_INDEX_URL"
+
+  echo "[HooliPods A1111] Preinstalling OpenAI CLIP without build isolation..."
+  pip install --no-build-isolation "https://github.com/openai/CLIP/archive/d50d76daa670286dd6cacf3bcd80b5e4823fc8e1.zip"
+
+  SITE="$("$VENV_PATH/bin/python" - <<'PY'
+import site
+print(site.getsitepackages()[0])
+PY
+)"
+  echo "[HooliPods A1111] Cleaning broken gradio leftovers in $SITE..."
+  find "$SITE" -maxdepth 1 \( -name "-radio*" -o -name "-radio*.dist-info" \) -print -exec rm -rf {} + || true
+
+  echo "[HooliPods A1111] Installing ControlNet helper dependencies..."
+  python -m pip install --prefer-binary \
+    svglib \
+    reportlab \
+    rlpycairo \
+    pycairo \
+    cssselect2 \
+    tinycss2 \
+    webencodings
+
+  echo "[HooliPods A1111] Checking mediapipe..."
+  python - <<'PY'
+import sys
+import subprocess
+
+def has_solutions():
+    try:
+        import mediapipe as mp
+        print("mediapipe:", getattr(mp, "__version__", "?"), mp.__file__, "has solutions:", hasattr(mp, "solutions"))
+        return hasattr(mp, "solutions")
+    except Exception as exc:
+        print("mediapipe import failed:", exc)
+        return False
+
+if not has_solutions():
+    subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "mediapipe", "mediapipe-nightly"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--prefer-binary", "mediapipe==0.10.14"])
+    if not has_solutions():
+        raise SystemExit("mediapipe still has no solutions")
+PY
+
+  echo "[HooliPods A1111] Bootstrap smoke test..."
+  python - <<'PY'
+import torch
+print("torch:", torch.__version__, "cuda:", torch.version.cuda, "available:", torch.cuda.is_available())
+import svglib
+import cairo
+import mediapipe as mp
+print("svglib ok")
+print("cairo ok")
+print("mediapipe solutions:", hasattr(mp, "solutions"))
+PY
+
+  date -Iseconds > "$BOOTSTRAP_MARKER"
+  echo "[HooliPods A1111] Bootstrap marker written: $BOOTSTRAP_MARKER"
+else
+  echo "[HooliPods A1111] Bootstrap marker exists. Skipping pip/torch/clip/deps install. Set FORCE_BOOTSTRAP=1 to rerun."
+fi
 
 cat > "$A1111_DIR/webui-user.sh" <<EOF
 #!/usr/bin/env bash
@@ -85,6 +160,11 @@ export venv_dir="$VENV_PATH"
 export TORCH_COMMAND="pip install torch torchvision torchaudio --index-url $TORCH_INDEX_URL"
 export STABLE_DIFFUSION_REPO="$STABLE_DIFFUSION_REPO"
 export GIT_TERMINAL_PROMPT=0
+export XDG_CACHE_HOME="$XDG_CACHE_HOME"
+export HF_HOME="$HF_HOME"
+export TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE"
+export TORCH_HOME="$TORCH_HOME"
+export PIP_CACHE_DIR="$PIP_CACHE_DIR"
 EOF
 
 chmod +x "$A1111_DIR/webui-user.sh"
@@ -123,8 +203,9 @@ jupyter lab \
   --ServerApp.root_dir="$WORKSPACE" \
   > "$WORKSPACE/logs/jupyter.log" 2>&1 &
 
-echo "[HooliPods A1111] CUDA diagnostic"
-"$VENV_PATH/bin/python" - <<'PY' || true
+if [[ "$RUN_CUDA_DIAGNOSTIC" == "1" ]]; then
+  echo "[HooliPods A1111] CUDA diagnostic"
+  "$VENV_PATH/bin/python" - <<'PY' || true
 import torch
 print("torch:", torch.__version__)
 print("cuda build:", torch.version.cuda)
@@ -133,6 +214,9 @@ if torch.cuda.is_available():
     print("gpu:", torch.cuda.get_device_name(0))
     print("capability:", torch.cuda.get_device_capability(0))
 PY
+else
+  echo "[HooliPods A1111] CUDA diagnostic skipped. Set RUN_CUDA_DIAGNOSTIC=1 to enable."
+fi
 
 echo "[HooliPods A1111] Starting A1111 on :7860"
 bash "$A1111_DIR/webui.sh" -f 2>&1 | tee "$WORKSPACE/logs/webui.log"

@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3.10-venv python3-pip \
     git git-lfs curl wget aria2 ca-certificates \
     build-essential pkg-config cmake ninja-build \
+    libcairo2-dev python3-dev \
     ffmpeg libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgoogle-perftools4 \
     unzip p7zip-full nano htop tmux procps bc \
     && rm -rf /var/lib/apt/lists/*
