@@ -48,7 +48,7 @@ mkdir -p "$WORKSPACE/embeddings"
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$USER_DATA_DIR"
 mkdir -p "$WORKSPACE/config/a1111"
-mkdir -p "$XDG_CACHE_HOME" "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR" "$WORKSPACE/.hoolipods"
+mkdir -p "$XDG_CACHE_HOME" "$HF_HOME" "$TORCH_HOME" "$PIP_CACHE_DIR" "$WORKSPACE/.hoolipods" "$WORKSPACE/.filebrowser"
 
 rm -rf "$USER_DATA_DIR/outputs"
 ln -s "$OUTPUT_DIR" "$USER_DATA_DIR/outputs"
@@ -101,8 +101,13 @@ import site
 print(site.getsitepackages()[0])
 PY
 )"
-  echo "[HooliPods A1111] Cleaning broken gradio leftovers in $SITE..."
-  find "$SITE" -maxdepth 1 \( -name "-radio*" -o -name "-radio*.dist-info" \) -print -exec rm -rf {} + || true
+  echo "[HooliPods A1111] Cleaning broken package leftovers in $SITE..."
+  find "$SITE" -maxdepth 1 \( \
+    -name "-radio*" \
+    -o -name "mediapipe" \
+    -o -name "mediapipe-*.dist-info" \
+    -o -name "mediapipe.libs" \
+  \) -print -exec rm -rf {} + || true
 
   echo "[HooliPods A1111] Installing ControlNet helper dependencies..."
   python -m pip install --prefer-binary \
@@ -114,37 +119,26 @@ PY
     tinycss2 \
     webencodings
 
-  echo "[HooliPods A1111] Checking mediapipe..."
-  python - <<'PY'
-import sys
-import subprocess
+  echo "[HooliPods A1111] Restoring A1111-compatible numpy/protobuf pins..."
+  python -m pip install --force-reinstall --no-deps \
+    "numpy==1.26.2" \
+    "protobuf==3.20.0"
 
-def has_solutions():
-    try:
-        import mediapipe as mp
-        print("mediapipe:", getattr(mp, "__version__", "?"), mp.__file__, "has solutions:", hasattr(mp, "solutions"))
-        return hasattr(mp, "solutions")
-    except Exception as exc:
-        print("mediapipe import failed:", exc)
-        return False
-
-if not has_solutions():
-    subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "mediapipe", "mediapipe-nightly"])
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--prefer-binary", "mediapipe==0.10.14"])
-    if not has_solutions():
-        raise SystemExit("mediapipe still has no solutions")
-PY
+  echo "[HooliPods A1111] Installing mediapipe package without pulling numpy2/protobuf4/jax deps..."
+  python -m pip install --force-reinstall --no-deps "mediapipe==0.10.11" || true
 
   echo "[HooliPods A1111] Bootstrap smoke test..."
   python - <<'PY'
+import numpy
+import google.protobuf
 import torch
+print("numpy:", numpy.__version__)
+print("protobuf:", google.protobuf.__version__)
 print("torch:", torch.__version__, "cuda:", torch.version.cuda, "available:", torch.cuda.is_available())
 import svglib
 import cairo
-import mediapipe as mp
 print("svglib ok")
 print("cairo ok")
-print("mediapipe solutions:", hasattr(mp, "solutions"))
 PY
 
   date -Iseconds > "$BOOTSTRAP_MARKER"
@@ -184,12 +178,18 @@ ln -s "$WORKSPACE/models/ControlNet" "$A1111_DIR/models/ControlNet"
 ln -s "$WORKSPACE/embeddings" "$A1111_DIR/embeddings"
 
 echo "[HooliPods A1111] Starting FileBrowser on :8080"
-filebrowser \
-  --address 0.0.0.0 \
-  --port 8080 \
-  --root "$WORKSPACE" \
-  --database "$WORKSPACE/filebrowser.db" \
-  > "$WORKSPACE/logs/filebrowser.log" 2>&1 &
+FB_DB="$WORKSPACE/.filebrowser/hoolipods_filebrowser.db"
+FB_LOG="$WORKSPACE/logs/filebrowser.log"
+FB_USER="admin"
+FB_PASS="HooliPods_FileBrowser_2026_Strong!"
+
+pkill -f 'filebrowser.*8080' || pkill -f filebrowser || true
+filebrowser config init -d "$FB_DB" -r "$WORKSPACE" || true
+filebrowser config set -d "$FB_DB" --address 0.0.0.0 --port 8080 --root "$WORKSPACE" --minimumPasswordLength 8 || true
+filebrowser config set -d "$FB_DB" --auth.method=json || true
+filebrowser users update "$FB_USER" --password "$FB_PASS" --perm.admin -d "$FB_DB" || filebrowser users add "$FB_USER" "$FB_PASS" --perm.admin -d "$FB_DB" || true
+filebrowser users ls -d "$FB_DB" || true
+nohup filebrowser -d "$FB_DB" -a 0.0.0.0 -p 8080 -r "$WORKSPACE" > "$FB_LOG" 2>&1 &
 
 echo "[HooliPods A1111] Starting JupyterLab on :8888"
 jupyter lab \
